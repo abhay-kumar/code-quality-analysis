@@ -1,0 +1,82 @@
+name: 'Code Quality Analysis'
+description: 'Publishes Code Quality Report of the pull request compared with the master.'
+inputs:
+  BRANCH:
+    description: ''
+    required: true
+  GIT_TOKEN:
+    description: ''
+    required: true
+  GITHUB_REF:
+    description: ''
+    required: true
+  SONAR_MASTER_PROJECT:
+    description: ''
+    required: true
+  SONAR_DEV_PROJECT:
+    description: ''
+    required: true
+  SONARQUBE_HOST:
+    description: ''
+    required: true
+  SONARCLOUD_URL:
+    description: ''
+    required: true
+  REPORT_PATHS:
+    description: ''
+    required: true
+  EXCLUSIONS:
+    description: ''
+    required: true
+runs:
+  using: "composite"
+  steps:
+    - name: Set Sonarqube Project
+      id: set_sonar_project
+      run: |
+        BRANCH=${{ inputs.BRANCH }}
+        SONAR_PROJECT=${{ SONAR_DEV_PROJECT }}
+        if [ "$BRANCH" == "master" ]; then
+          SONAR_PROJECT=${{ SONAR_MASTER_PROJECT }};
+        fi
+        echo ::set-output name=sonar_project::$SONAR_PROJECT
+    - name: Integration Coverage Push to sonar
+      uses: sonarsource/sonarcloud-github-action@v1.4
+      env:
+        SONAR_HOST: ${{ inputs.SONARQUBE_HOST }}
+        SONAR_TOKEN: ${{ inputs.SONARQUBE_TOKEN }}
+        SONARCLOUD_URL: ${{ inputs.SONARCLOUD_URL }}
+        SONAR_INTEGRATION_TOKEN: ${{ inputs.SONARQUBE_TOKEN }}
+      with:
+        args: >
+          -Dsonar.host.url=${{ inputs.SONARCLOUD_URL }}
+          -Dsonar.projectKey=${{ steps.set_sonar_project.outputs.sonar_project }}
+          -Dsonar.projectName=${{ steps.set_sonar_project.outputs.sonar_project }}
+          -Dsonar.projectVersion=${{ github.sha }}
+          -Dsonar.login=${{ inputs.SONARQUBE_TOKEN }}
+          -Dsonar.projectBaseDir=./
+          -Dsonar.sourceEncoding=UTF-8
+          -Dsonar.go.coverage.reportPaths=${{ inputs.REPORT_PATHS }}
+          -Dsonar.exclusions=${{ inputs.EXCLUSIONS }}
+    - name: Find PR Number
+      if: github.ref != 'refs/heads/master'
+      uses: razorpay/gh-find-current-pr@v1
+      id: findPr
+    - name: Code Quality Analysis
+      if: github.ref != 'refs/heads/master' && success() && steps.findPr.outputs.number
+      id: code_quality_analysis
+      run: scripts/quality_analysis.sh
+      shell: bash
+      env:
+        SONAR_HOST: ${{ inputs.SONARQUBE_HOST }}
+        SONAR_TOKEN: ${{ inputs.SONARQUBE_TOKEN }}
+        GIT_SHA: ${{ github.sha }}
+    - name: Add Quality Report Comment
+      if: github.ref != 'refs/heads/master' && success() && steps.findPr.outputs.number
+      uses: razorpay/create-comment@v1
+      env:
+        GITHUB_TOKEN: ${{ inputs.GIT_TOKEN }}
+      with:
+        number: ${{ steps.findPr.outputs.pr }}
+        comment: |
+          ${{ steps.code_quality_analysis.outputs.quality_report }}
